@@ -23,27 +23,23 @@ app.get("/", (req, res) => {
         <h2>✅ Claude Analyzer connected!</h2>
         <p style="color:#888">Ask Claude anything about your store:</p>
         <div style="display:flex;flex-direction:column;gap:12px;margin-top:1.5rem">
-          <a href="/ask?q=How many orders did I get today per funnel?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Orders per funnel today</a>
-          <a href="/ask?q=Which funnel made the most revenue this week?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Best funnel this week</a>
-          <a href="/ask?q=Which product has the most refunds?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Refund analysis</a>
-          <a href="/ask?q=Compare this month vs last month revenue" style="color:#5DCAA5;font-size:15px" target="_blank">→ Month vs last month</a>
-          <a href="/ask?q=What is my total revenue today?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Total revenue today</a>
+          <a href="/ask?q=How many orders did I get today per funnel?" style="color:#5DCAA5;font-size:15px">→ Orders per funnel today</a>
+          <a href="/ask?q=Which funnel made the most revenue this week?" style="color:#5DCAA5;font-size:15px">→ Best funnel this week</a>
+          <a href="/ask?q=Which product has the most refunds?" style="color:#5DCAA5;font-size:15px">→ Refund analysis</a>
+          <a href="/ask?q=Compare this month vs last month revenue" style="color:#5DCAA5;font-size:15px">→ Month vs last month</a>
+          <a href="/ask?q=What is my total revenue today?" style="color:#5DCAA5;font-size:15px">→ Total revenue today</a>
+          <a href="/ask?q=Show me all orders from the last 7 days with funnel names and totals" style="color:#5DCAA5;font-size:15px">→ Last 7 days summary</a>
         </div>
       </body></html>
     `);
   }
 
-  // Correct LightFunnels OAuth URL
   const authUrl = `https://app.lightfunnels.com/admin/oauth?client_id=${LF_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=orders,funnels,products&state=claude123`;
-
   res.send(`
     <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:500px;text-align:center">
       <h2>Claude Analyzer</h2>
       <p style="color:#888;margin-bottom:2rem">Connect your LightFunnels store to Claude</p>
-      <a href="${authUrl}" target="_blank" style="
-        display:inline-block;background:#1D9E75;color:white;
-        padding:14px 32px;border-radius:8px;text-decoration:none;
-        font-size:16px;font-weight:500;">Connect my store →</a>
+      <a href="${authUrl}" target="_blank" style="display:inline-block;background:#1D9E75;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-size:16px;font-weight:500;">Connect my store →</a>
       <p style="color:#555;font-size:12px;margin-top:1.5rem">Opens a new tab. After approving, come back and refresh.</p>
     </body></html>
   `);
@@ -51,83 +47,115 @@ app.get("/", (req, res) => {
 
 // ─── OAuth callback ─────────────────────────────────────────────────────────
 app.get("/callback", async (req, res) => {
-  console.log("Callback hit! Query:", JSON.stringify(req.query));
   const { code } = req.query;
-  if (!code) return res.status(400).send("Missing code. Got: " + JSON.stringify(req.query));
-
+  if (!code) return res.status(400).send("Missing code.");
   try {
-    // LightFunnels requires Basic auth with base64(client_id:client_secret)
     const credentials = Buffer.from(`${LF_CLIENT_ID}:${LF_SECRET}`).toString("base64");
-
     const tokenRes = await fetch("https://api.lightfunnels.com/api/access_token", {
       method: "POST",
-      headers: {
-        "Authorization": `Basic ${credentials}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      headers: { "Authorization": `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ code }).toString(),
     });
-
     const data = await tokenRes.json();
-    console.log("Token response:", JSON.stringify(data));
-
     if (data.access_token) {
       accessToken = data.access_token;
-      console.log("✅ Access token stored!");
-      return res.send(`
-        <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;text-align:center">
-          <h2>✅ Connected!</h2>
-          <p>Your store is now linked to Claude.</p>
-          <p style="color:#888;margin-bottom:1.5rem">Close this tab and go back to Claude Analyzer.</p>
-          <a href="/ask?q=How many orders per funnel today?" 
-             style="display:inline-block;background:#1D9E75;color:white;padding:12px 24px;border-radius:8px;text-decoration:none">
-            Ask Claude now →
-          </a>
-        </body></html>
-      `);
-    } else {
-      res.send(`
-        <html><body style="background:#0f0f0f;color:white;padding:2rem;font-family:sans-serif">
-          <h3>Auth response (send to Claude):</h3>
-          <pre style="background:#1a1a1a;padding:1rem;border-radius:8px;overflow:auto">${JSON.stringify(data, null, 2)}</pre>
-        </body></html>
-      `);
+      return res.send(`<html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;text-align:center">
+        <h2>✅ Connected!</h2><p>Close this tab and go back to Claude Analyzer.</p>
+        <a href="/" style="color:#5DCAA5">Or ask a question now →</a>
+      </body></html>`);
     }
+    res.send(`<pre style="background:#0f0f0f;color:white;padding:2rem">${JSON.stringify(data, null, 2)}</pre>`);
   } catch (err) {
-    console.error("Token error:", err.message);
     res.status(500).send("Error: " + err.message);
   }
 });
 
 // ─── GraphQL helper ─────────────────────────────────────────────────────────
-async function queryLF(query, variables = {}) {
-  if (!accessToken) throw new Error("Not connected. Please authorize first.");
+async function queryLF(gqlQuery, variables = {}) {
+  if (!accessToken) throw new Error("Not connected.");
   const res = await fetch("https://services.lightfunnels.com/api/v2", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query: gqlQuery, variables }),
   });
   return res.json();
+}
+
+// ─── Fetch funnels to map funnel_id → name ──────────────────────────────────
+async function getFunnelMap() {
+  try {
+    const data = await queryLF(`query { funnels(first:100, query:"") { edges { node { _id name } } } }`);
+    const funnels = data?.data?.funnels?.edges?.map(e => e.node) || [];
+    const map = {};
+    funnels.forEach(f => { map[f._id] = f.name; });
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 // ─── Ask Claude ─────────────────────────────────────────────────────────────
 app.get("/ask", async (req, res) => {
   const question = req.query.q;
   if (!question) return res.status(400).send("Add ?q=your question");
+
   try {
-    const ordersData = await queryLF(`query { orders(first:250) { edges { node { id created_at total_price financial_status funnel { name } line_items { edges { node { title quantity price } } } } } } }`);
+    // Fetch orders
+    const ordersData = await queryLF(`
+      query {
+        orders(first: 250, query: "") {
+          edges {
+            node {
+              _id
+              created_at
+              total
+              subtotal
+              financial_status
+              fulfillment_status
+              funnel_id
+              name
+              email
+            }
+          }
+        }
+      }
+    `);
+
     const orders = ordersData?.data?.orders?.edges?.map(e => e.node) || [];
+
+    // Fetch funnel names
+    const funnelMap = await getFunnelMap();
+
+    // Attach funnel names to orders
+    const enrichedOrders = orders.map(o => ({
+      ...o,
+      funnel_name: funnelMap[o.funnel_id] || `Funnel ${o.funnel_id}`,
+    }));
+
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6", max_tokens: 800,
-      messages: [{ role: "user", content: `Sales analyst for LightFunnels store. ${orders.length} orders: ${JSON.stringify(orders, null, 2)}. Today: ${new Date().toISOString().split("T")[0]}. Question: ${question}. Answer with specific numbers and funnel names.` }],
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: `You are a sales analyst for a LightFunnels e-commerce store.
+Here are ${enrichedOrders.length} orders with funnel names: ${JSON.stringify(enrichedOrders, null, 2)}
+Today's date: ${new Date().toISOString().split("T")[0]}
+Question: ${question}
+Answer clearly with specific numbers, funnel names, and totals. Currency is in the store's local currency.`
+      }],
     });
+
     const answer = response.content.map(b => b.text || "").join("");
-    res.send(`<html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:800px">
-      <p style="color:#888;font-size:13px">Question</p><h3>${question}</h3>
-      <p style="color:#888;font-size:13px;margin-top:1.5rem">Claude's answer</p>
-      <div style="background:#1a1a1a;padding:1.5rem;border-radius:8px;line-height:1.8;white-space:pre-wrap">${answer}</div>
-      <p style="margin-top:1.5rem"><a href="/" style="color:#5DCAA5">← Ask another question</a></p>
-    </body></html>`);
+
+    res.send(`
+      <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:800px">
+        <p style="color:#888;font-size:13px">Question</p>
+        <h3 style="margin-top:4px">${question}</h3>
+        <p style="color:#888;font-size:13px;margin-top:1.5rem">Claude's answer</p>
+        <div style="background:#1a1a1a;padding:1.5rem;border-radius:8px;line-height:1.8;white-space:pre-wrap">${answer}</div>
+        <p style="margin-top:1.5rem"><a href="/" style="color:#5DCAA5">← Ask another question</a></p>
+      </body></html>
+    `);
   } catch (err) {
     res.status(500).send(`<html><body style="background:#0f0f0f;color:white;padding:2rem">Error: ${err.message}<br><a href="/" style="color:#5DCAA5">← Back</a></body></html>`);
   }
@@ -155,37 +183,6 @@ app.post("/webhook", async (req, res) => {
     if (insights.length > 100) insights.pop();
     res.status(200).json({ received: true, analysis });
   } catch (err) { res.status(500).json({ error: "Analysis failed" }); }
-});
-
-// ─── Debug: see raw API response ───────────────────────────────────────────
-app.get("/debug", async (req, res) => {
-  if (!accessToken) return res.json({ error: "Not connected" });
-  
-  // Try multiple possible query structures
-  const queries = [
-    { name: "orders_with_query", query: `query { orders(first:5, query:"") { edges { node { id created_at } } } }` },
-    { name: "order_fields", query: `query { orders(first:1, query:"") { edges { node { id created_at status subtotal total funnel { name } } } } }` },
-    { name: "schema", query: `query { __type(name:"Order") { fields { name type { name kind } } } }` },
-  ];
-
-  const results = {};
-  for (const q of queries) {
-    try {
-      const r = await fetch("https://services.lightfunnels.com/api/v2", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ query: q.query }),
-      });
-      results[q.name] = await r.json();
-    } catch (e) {
-      results[q.name] = { error: e.message };
-    }
-  }
-
-  res.send(`<html><body style="background:#0f0f0f;color:white;padding:2rem;font-family:monospace">
-    <h3>Raw API Debug</h3>
-    <pre style="background:#1a1a1a;padding:1rem;border-radius:8px;overflow:auto;font-size:12px">${JSON.stringify(results, null, 2)}</pre>
-  </body></html>`);
 });
 
 app.get("/insights", (req, res) => res.json({ total: insights.length, insights }));
