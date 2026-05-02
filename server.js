@@ -157,6 +157,37 @@ app.post("/webhook", async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Analysis failed" }); }
 });
 
+// ─── Debug: see raw API response ───────────────────────────────────────────
+app.get("/debug", async (req, res) => {
+  if (!accessToken) return res.json({ error: "Not connected" });
+  
+  // Try multiple possible query structures
+  const queries = [
+    { name: "orders_v1", query: `query { orders(first:5) { edges { node { id created_at total_price } } } }` },
+    { name: "orders_v2", query: `query { orders(first:5) { nodes { id created_at total_price } } }` },
+    { name: "me", query: `query { me { id email } }` },
+  ];
+
+  const results = {};
+  for (const q of queries) {
+    try {
+      const r = await fetch("https://services.lightfunnels.com/api/v2", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ query: q.query }),
+      });
+      results[q.name] = await r.json();
+    } catch (e) {
+      results[q.name] = { error: e.message };
+    }
+  }
+
+  res.send(`<html><body style="background:#0f0f0f;color:white;padding:2rem;font-family:monospace">
+    <h3>Raw API Debug</h3>
+    <pre style="background:#1a1a1a;padding:1rem;border-radius:8px;overflow:auto;font-size:12px">${JSON.stringify(results, null, 2)}</pre>
+  </body></html>`);
+});
+
 app.get("/insights", (req, res) => res.json({ total: insights.length, insights }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
