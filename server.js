@@ -84,10 +84,10 @@ async function queryLF(gqlQuery, variables = {}) {
 // ─── Fetch funnels to map funnel_id → name ──────────────────────────────────
 async function getFunnelMap() {
   try {
-    const data = await queryLF(`query { funnels(first:100, query:"") { edges { node { _id name } } } }`);
+    const data = await queryLF(`query { funnels(first:100, query:"") { edges { node { _id id name } } } }`);
     const funnels = data?.data?.funnels?.edges?.map(e => e.node) || [];
     const map = {};
-    funnels.forEach(f => { map[f._id] = f.name; });
+    funnels.forEach(f => { map[f._id] = f.name; map[f.id] = f.name; });
     return map;
   } catch {
     return {};
@@ -187,7 +187,7 @@ app.post("/webhook", async (req, res) => {
 
 app.get("/funnels-debug", async (req, res) => {
   if (!accessToken) return res.json({ error: "Not connected" });
-  const data = await queryLF(`query { funnels(first:20, query:"") { edges { node { _id name } } } }`);
+  const data = await queryLF(`query { funnels(first:20, query:"") { edges { node { _id id name } } } }`);
   res.json(data);
 });
 
