@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 3000;
 
 const LF_SECRET = process.env.LF_APP_SECRET;
 const LF_CLIENT_ID = process.env.LF_CLIENT_ID;
+const REDIRECT_URI = "https://lightfunnels-claude.onrender.com/callback";
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const insights = [];
@@ -14,64 +15,99 @@ let accessToken = null;
 
 app.use(express.json());
 
-// ─── Get token using client credentials ────────────────────────────────────
-async function getToken() {
-  if (accessToken) return accessToken;
-  const res = await fetch("https://services.lightfunnels.com/auth/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: LF_CLIENT_ID,
-      client_secret: LF_SECRET,
-      grant_type: "client_credentials",
-    }),
-  });
-  const data = await res.json();
-  console.log("Token response:", JSON.stringify(data));
-  if (data.access_token) {
-    accessToken = data.access_token;
-    console.log("✅ Token obtained via client credentials");
+// ─── Home: opens OAuth in new tab to escape iframe ─────────────────────────
+app.get("/", (req, res) => {
+  if (accessToken) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:700px">
+        <h2>✅ Claude Analyzer connected!</h2>
+        <p style="color:#888">Ask Claude anything about your store:</p>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:1.5rem">
+          <a href="/ask?q=How many orders did I get today per funnel?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Orders per funnel today</a>
+          <a href="/ask?q=Which funnel made the most revenue this week?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Best funnel this week</a>
+          <a href="/ask?q=Which product has the most refunds?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Refund analysis</a>
+          <a href="/ask?q=Compare this month vs last month revenue" style="color:#5DCAA5;font-size:15px" target="_blank">→ Month vs last month</a>
+          <a href="/ask?q=What is my total revenue today?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Total revenue today</a>
+        </div>
+      </body></html>
+    `);
   }
-  return accessToken;
-}
 
-// Try to get token on startup
-getToken().catch(e => console.log("Startup token error:", e.message));
+  const authUrl = `https://app.lightfunnels.com/oauth/authorize?client_id=${LF_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code`;
+
+  res.send(`
+    <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:500px;text-align:center">
+      <h2>Claude Analyzer</h2>
+      <p style="color:#888;margin-bottom:2rem">Click below to connect your LightFunnels store to Claude</p>
+      <a href="${authUrl}" target="_blank" style="
+        display:inline-block;
+        background:#1D9E75;
+        color:white;
+        padding:14px 32px;
+        border-radius:8px;
+        text-decoration:none;
+        font-size:16px;
+        font-weight:500;
+      ">Connect my store →</a>
+      <p style="color:#555;font-size:12px;margin-top:1.5rem">This opens a new tab. After approving, come back here and refresh.</p>
+    </body></html>
+  `);
+});
+
+// ─── OAuth callback ─────────────────────────────────────────────────────────
+app.get("/callback", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send("Missing code.");
+
+  try {
+    const tokenRes = await fetch("https://services.lightfunnels.com/auth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: LF_CLIENT_ID,
+        client_secret: LF_SECRET,
+        code,
+        redirect_uri: REDIRECT_URI,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    const data = await tokenRes.json();
+    console.log("Token response:", JSON.stringify(data));
+
+    if (data.access_token) {
+      accessToken = data.access_token;
+      console.log("✅ Access token stored!");
+      return res.send(`
+        <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;text-align:center">
+          <h2>✅ Connected!</h2>
+          <p>Your store is now linked to Claude.</p>
+          <p style="color:#888">You can close this tab and go back to your LightFunnels dashboard.</p>
+          <a href="/" style="color:#5DCAA5">Or click here to start asking questions →</a>
+        </body></html>
+      `);
+    } else {
+      res.status(400).send("Auth failed: " + JSON.stringify(data));
+    }
+  } catch (err) {
+    console.error("Token error:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
 
 // ─── GraphQL helper ─────────────────────────────────────────────────────────
 async function queryLF(query, variables = {}) {
-  const token = await getToken();
-  if (!token) throw new Error("Could not obtain access token.");
+  if (!accessToken) throw new Error("Not connected. Please authorize first.");
   const res = await fetch("https://services.lightfunnels.com/api/v2", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ query, variables }),
   });
   return res.json();
 }
-
-// ─── Home page ──────────────────────────────────────────────────────────────
-app.get("/", async (req, res) => {
-  const token = await getToken();
-  res.send(`
-    <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:700px">
-      <h2>${token ? "✅ Claude Analyzer connected" : "⚠️ Not connected yet"}</h2>
-      ${token ? `
-      <p>Ask Claude anything about your store:</p>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-top:1rem">
-        <a href="/ask?q=How many orders did I get today per funnel?" style="color:#5DCAA5">→ Orders per funnel today</a>
-        <a href="/ask?q=Which funnel made the most revenue this week?" style="color:#5DCAA5">→ Best funnel this week</a>
-        <a href="/ask?q=Which product has the most refunds?" style="color:#5DCAA5">→ Refund analysis</a>
-        <a href="/ask?q=Compare this month vs last month revenue" style="color:#5DCAA5">→ Month vs last month</a>
-        <a href="/ask?q=What is my total revenue today?" style="color:#5DCAA5">→ Total revenue today</a>
-      </div>
-      ` : `<p>Token not available. Check your LF_CLIENT_ID and LF_APP_SECRET on Render.</p>`}
-    </body></html>
-  `);
-});
 
 // ─── Ask Claude ─────────────────────────────────────────────────────────────
 app.get("/ask", async (req, res) => {
@@ -96,8 +132,8 @@ app.get("/ask", async (req, res) => {
       }
     `);
 
-    console.log("Orders response:", JSON.stringify(ordersData).slice(0, 300));
     const orders = ordersData?.data?.orders?.edges?.map(e => e.node) || [];
+    console.log(`Fetched ${orders.length} orders for question: ${question}`);
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -120,12 +156,12 @@ Answer clearly with specific numbers and funnel names.`
         <h3 style="margin-top:4px">${question}</h3>
         <p style="color:#888;font-size:13px;margin-top:1.5rem">Claude's answer</p>
         <div style="background:#1a1a1a;padding:1.5rem;border-radius:8px;line-height:1.8;white-space:pre-wrap">${answer}</div>
-        <p style="margin-top:1.5rem"><a href="/" style="color:#5DCAA5">← Back</a></p>
+        <p style="margin-top:1.5rem"><a href="/" style="color:#5DCAA5">← Ask another question</a></p>
       </body></html>
     `);
   } catch (err) {
     res.status(500).send(`<html><body style="background:#0f0f0f;color:white;padding:2rem">
-      Error: ${err.message}<br><a href="/" style="color:#5DCAA5">← Back</a>
+      Error: ${err.message}<br><br><a href="/" style="color:#5DCAA5">← Back</a>
     </body></html>`);
   }
 });
