@@ -118,7 +118,7 @@ app.get("/ask", async (req, res) => {
     const ordersData = await queryLF(`query { orders(first:250) { edges { node { id created_at total_price financial_status funnel { name } line_items { edges { node { title quantity price } } } } } } }`);
     const orders = ordersData?.data?.orders?.edges?.map(e => e.node) || [];
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514", max_tokens: 800,
+      model: "claude-sonnet-4-6", max_tokens: 800,
       messages: [{ role: "user", content: `Sales analyst for LightFunnels store. ${orders.length} orders: ${JSON.stringify(orders, null, 2)}. Today: ${new Date().toISOString().split("T")[0]}. Question: ${question}. Answer with specific numbers and funnel names.` }],
     });
     const answer = response.content.map(b => b.text || "").join("");
@@ -147,7 +147,7 @@ app.post("/webhook", async (req, res) => {
     return res.status(200).json({ message: "Not tracked" });
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514", max_tokens: 300,
+      model: "claude-sonnet-4-6", max_tokens: 300,
       messages: [{ role: "user", content: `Sales analyst. Event: ${type}. Data: ${JSON.stringify(data)}. Respond ONLY with JSON: {"summary":"...","insight":"...","flag":"none|warning|opportunity","flagReason":"..."}` }],
     });
     const analysis = JSON.parse(response.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim());
