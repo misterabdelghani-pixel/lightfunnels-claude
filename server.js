@@ -185,6 +185,12 @@ app.post("/webhook", async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Analysis failed" }); }
 });
 
+app.get("/funnels-debug", async (req, res) => {
+  if (!accessToken) return res.json({ error: "Not connected" });
+  const data = await queryLF(`query { funnels(first:20, query:"") { edges { node { _id name } } } }`);
+  res.json(data);
+});
+
 app.get("/insights", (req, res) => res.json({ total: insights.length, insights }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
