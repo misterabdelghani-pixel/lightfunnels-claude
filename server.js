@@ -15,75 +15,57 @@ let accessToken = null;
 
 app.use(express.json());
 
-// ─── Log ALL requests so we can see what LightFunnels sends ────────────────
-app.use((req, res, next) => {
-  console.log("=== INCOMING REQUEST ===");
-  console.log("URL:", req.url);
-  console.log("Query:", JSON.stringify(req.query));
-  console.log("Headers:", JSON.stringify(req.headers));
-  console.log("========================");
-  next();
-});
-
 // ─── Home ───────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
-  // If LightFunnels sends a code directly to the root, handle it
-  if (req.query.code) {
-    return res.redirect(`/callback?code=${req.query.code}`);
-  }
-
   if (accessToken) {
     return res.send(`
       <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:700px">
         <h2>✅ Claude Analyzer connected!</h2>
+        <p style="color:#888">Ask Claude anything about your store:</p>
         <div style="display:flex;flex-direction:column;gap:12px;margin-top:1.5rem">
           <a href="/ask?q=How many orders did I get today per funnel?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Orders per funnel today</a>
           <a href="/ask?q=Which funnel made the most revenue this week?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Best funnel this week</a>
           <a href="/ask?q=Which product has the most refunds?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Refund analysis</a>
           <a href="/ask?q=Compare this month vs last month revenue" style="color:#5DCAA5;font-size:15px" target="_blank">→ Month vs last month</a>
+          <a href="/ask?q=What is my total revenue today?" style="color:#5DCAA5;font-size:15px" target="_blank">→ Total revenue today</a>
         </div>
       </body></html>
     `);
   }
 
+  // Correct LightFunnels OAuth URL
+  const authUrl = `https://app.lightfunnels.com/admin/oauth?client_id=${LF_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=orders,funnels,products&state=claude123`;
+
   res.send(`
     <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;max-width:500px;text-align:center">
       <h2>Claude Analyzer</h2>
       <p style="color:#888;margin-bottom:2rem">Connect your LightFunnels store to Claude</p>
-      <a href="https://lightfunnels-claude.onrender.com/connect" target="_blank" style="
+      <a href="${authUrl}" target="_blank" style="
         display:inline-block;background:#1D9E75;color:white;
         padding:14px 32px;border-radius:8px;text-decoration:none;
         font-size:16px;font-weight:500;">Connect my store →</a>
-      <p style="color:#555;font-size:12px;margin-top:1.5rem">Opens a new tab. After approving, come back and refresh this page.</p>
+      <p style="color:#555;font-size:12px;margin-top:1.5rem">Opens a new tab. After approving, come back and refresh.</p>
     </body></html>
   `);
-});
-
-// ─── Connect: opens OAuth in new tab ───────────────────────────────────────
-app.get("/connect", (req, res) => {
-  // Try multiple possible OAuth URLs
-  const authUrl = `https://app.lightfunnels.com/oauth/authorize?client_id=${LF_CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code`;
-  console.log("Redirecting to OAuth URL:", authUrl);
-  res.redirect(authUrl);
 });
 
 // ─── OAuth callback ─────────────────────────────────────────────────────────
 app.get("/callback", async (req, res) => {
   console.log("Callback hit! Query:", JSON.stringify(req.query));
   const { code } = req.query;
-  if (!code) return res.status(400).send("Missing code. Query was: " + JSON.stringify(req.query));
+  if (!code) return res.status(400).send("Missing code. Got: " + JSON.stringify(req.query));
 
   try {
-    const tokenRes = await fetch("https://services.lightfunnels.com/auth/token", {
+    // LightFunnels requires Basic auth with base64(client_id:client_secret)
+    const credentials = Buffer.from(`${LF_CLIENT_ID}:${LF_SECRET}`).toString("base64");
+
+    const tokenRes = await fetch("https://api.lightfunnels.com/api/access_token", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: LF_CLIENT_ID,
-        client_secret: LF_SECRET,
-        code,
-        redirect_uri: REDIRECT_URI,
-        grant_type: "authorization_code",
-      }),
+      headers: {
+        "Authorization": `Basic ${credentials}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ code }).toString(),
     });
 
     const data = await tokenRes.json();
@@ -96,17 +78,18 @@ app.get("/callback", async (req, res) => {
         <html><body style="font-family:sans-serif;padding:2rem;background:#0f0f0f;color:white;text-align:center">
           <h2>✅ Connected!</h2>
           <p>Your store is now linked to Claude.</p>
-          <p style="color:#888">Close this tab and go back to Claude Analyzer in LightFunnels.</p>
-          <a href="https://lightfunnels-claude.onrender.com/ask?q=How many orders per funnel today?" 
-             style="color:#5DCAA5;display:block;margin-top:1rem">Or ask a question directly →</a>
+          <p style="color:#888;margin-bottom:1.5rem">Close this tab and go back to Claude Analyzer.</p>
+          <a href="/ask?q=How many orders per funnel today?" 
+             style="display:inline-block;background:#1D9E75;color:white;padding:12px 24px;border-radius:8px;text-decoration:none">
+            Ask Claude now →
+          </a>
         </body></html>
       `);
     } else {
       res.send(`
         <html><body style="background:#0f0f0f;color:white;padding:2rem;font-family:sans-serif">
-          <h3>Token exchange response:</h3>
-          <pre style="background:#1a1a1a;padding:1rem;border-radius:8px">${JSON.stringify(data, null, 2)}</pre>
-          <p>Send this to Claude to debug.</p>
+          <h3>Auth response (send to Claude):</h3>
+          <pre style="background:#1a1a1a;padding:1rem;border-radius:8px;overflow:auto">${JSON.stringify(data, null, 2)}</pre>
         </body></html>
       `);
     }
