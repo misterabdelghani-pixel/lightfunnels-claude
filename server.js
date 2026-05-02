@@ -163,9 +163,9 @@ app.get("/debug", async (req, res) => {
   
   // Try multiple possible query structures
   const queries = [
-    { name: "orders_v1", query: `query { orders(first:5) { edges { node { id created_at total_price } } } }` },
-    { name: "orders_v2", query: `query { orders(first:5) { nodes { id created_at total_price } } }` },
-    { name: "me", query: `query { me { id email } }` },
+    { name: "orders_with_query", query: `query { orders(first:5, query:"") { edges { node { id created_at } } } }` },
+    { name: "order_fields", query: `query { orders(first:1, query:"") { edges { node { id created_at status subtotal total funnel { name } } } } }` },
+    { name: "schema", query: `query { __type(name:"Order") { fields { name type { name kind } } } }` },
   ];
 
   const results = {};
